@@ -16,6 +16,7 @@ local Serializer = import("Serializer")
 local Equipment = import("Equipment")
 local ShipDef = import("ShipDef")
 local Ship = import("Ship")
+local Distance = import("Distance")
 local utils = import("utils")
 
 local InfoFace = import("ui/InfoFace")
@@ -27,7 +28,7 @@ local l = Lang.GetResource("module-assassination")
 local ui = Engine.ui
 
 -- don't produce missions for further than this many light years away
-local max_ass_dist = 30
+local max_ass_dist = Distance(30, "LY")
 
 local flavours = {}
 for i = 0,5 do
@@ -105,7 +106,7 @@ local onChat = function (form, ref, option)
 		  sectorX   = ad.location.sectorX,
 		  sectorY   = ad.location.sectorY,
 		  sectorZ   = ad.location.sectorZ,
-		  dist      = string.format("%.2f", ad.dist),
+		  dist      = string.format("%.2f", Distance.convert(ad.distMeters, "M", "LY")),
 		  date      = Format.Date(ad.due),
 		  shipname  = ad.shipname,
 		  shipregid = ad.shipregid,
@@ -161,7 +162,7 @@ end
 local nearbysystems
 local makeAdvert = function (station)
 	if nearbysystems == nil then
-		nearbysystems = Game.system:GetNearbySystems(max_ass_dist, function (s) return #s:GetStationPaths() > 0 end)
+		nearbysystems = Game.system:GetNearbySystems(max_ass_dist:get("LY"), function (s) return #s:GetStationPaths() > 0 end)
 	end
 	if #nearbysystems == 0 then return end
 	local client = Character.New()
@@ -171,7 +172,7 @@ local makeAdvert = function (station)
 	local nearbysystem = nearbysystems[Engine.rand:Integer(1,#nearbysystems)]
 	local nearbystations = nearbysystem:GetStationPaths()
 	local location = nearbystations[Engine.rand:Integer(1,#nearbystations)]
-	local dist = location:DistanceTo(Game.system)
+	local distance = Distance(location:DistanceTo(Game.system), "LY")
 	local time = Engine.rand:Number(0.3, 3)
 	local due = Game.time + Engine.rand:Number(7*60*60*24, time * 31*60*60*24)
 	local danger = Engine.rand:Integer(1,4)
@@ -192,7 +193,7 @@ local makeAdvert = function (station)
 		faceseed = Engine.rand:Integer(),
 		flavour = flavour,
 		location = location,
-		dist = dist,
+		distMeters = distance:get(),
 		reward = reward,
 		shipid = shipid,
 		shipname = shipname,
@@ -479,7 +480,7 @@ local onGameEnd = function ()
 end
 
 local onClick = function (mission)
-	local dist = Game.system and string.format("%.2f", Game.system:DistanceTo(mission.location)) or "???"
+	local dist = Game.system and Distance(Game.system:DistanceTo(mission.location), "LY"):to_string() or "???"
 	return ui:Grid(2,1)
 		:SetColumn(0,{ui:VBox(10):PackEnd({ui:MultiLineText((flavours[mission.flavour].introtext):interp({
 														name   = mission.client.name,
@@ -566,7 +567,7 @@ local onClick = function (mission)
 											})
 											:SetColumn(1, {
 												ui:VBox():PackEnd({
-													ui:Label(dist.." "..l.LY)
+													ui:Label(dist)
 												})
 											}),
 		})})
