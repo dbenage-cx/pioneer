@@ -13,6 +13,7 @@ local Serializer = import("Serializer")
 local Character = import("Character")
 local ShipDef = import("ShipDef")
 local Ship = import("Ship")
+local Distance = import("Distance")
 local eq = import("Equipment")
 local utils = import("utils")
 
@@ -26,12 +27,12 @@ local l = Lang.GetResource("module-taxi")
 local ui = Engine.ui
 
 -- don't produce missions for further than this many light years away
-local max_taxi_dist = 40
+local max_taxi_dist = Distance(40, "LY")
 -- typical time for travel to a system max_taxi_dist away
 --	Irigi: ~ 4 days for in-system travel, the rest is FTL travel time
-local typical_travel_time = (2.0 * max_taxi_dist + 4) * 24 * 60 * 60
+local typical_travel_time = (2.0 * max_taxi_dist:get("LY") + 4) * 24 * 60 * 60
 -- typical reward for taxi service to a system max_taxi_dist away
-local typical_reward = 75 * max_taxi_dist
+local typical_reward = 75 * max_taxi_dist:get("LY")
 -- max number of passengers per trip
 local max_group = 10
 
@@ -164,7 +165,7 @@ local onChat = function (form, ref, option)
 			sectorx  = ad.location.sectorX,
 			sectory  = ad.location.sectorY,
 			sectorz  = ad.location.sectorZ,
-			dist     = string.format("%.2f", ad.dist),
+			dist     = Distance.convert(ad.distMeters or ad.dist or 0, "M", "LY"),
 		})
 
 		form:SetMessage(introtext)
@@ -254,21 +255,22 @@ local makeAdvert = function (station)
 	end
 
 	if nearbysystems == nil then
-		nearbysystems = Game.system:GetNearbySystems(max_taxi_dist, function (s) return #s:GetStationPaths() > 0 end)
+		nearbysystems = Game.system:GetNearbySystems(max_taxi_dist:get("LY"), function (s) return #s:GetStationPaths() > 0 end)
 	end
 	if #nearbysystems == 0 then return end
 	location = nearbysystems[Engine.rand:Integer(1,#nearbysystems)]
-	local dist = location:DistanceTo(Game.system)
-	reward = ((dist / max_taxi_dist) * typical_reward * (group / 2) * (1+risk) * (1+3*urgency) * Engine.rand:Number(0.8,1.2))
+	local distance = Distance(location:DistanceTo(Game.system), "LY")
+    local dist_max_taxi_ratio = distance:get() / max_taxi_dist:get()
+	reward = (dist_max_taxi_ratio * typical_reward * (group / 2) * (1+risk) * (1+3*urgency) * Engine.rand:Number(0.8,1.2))
 	reward = math.ceil(reward)
-	due = Game.time + ((dist / max_taxi_dist) * typical_travel_time * (1.5-urgency) * Engine.rand:Number(0.9,1.1))
+	due = Game.time + (dist_max_taxi_ratio * typical_travel_time * (1.5-urgency) * Engine.rand:Number(0.9,1.1))
 
 	local ad = {
 		station		= station,
 		flavour		= flavour,
 		client		= client,
 		location	= location.path,
-		dist            = dist,
+		distMeters  = distance:get(),
 		due		= due,
 		group		= group,
 		risk		= risk,
@@ -471,7 +473,7 @@ local onGameEnd = function ()
 end
 
 local onClick = function (mission)
-	local dist = Game.system and string.format("%.2f", Game.system:DistanceTo(mission.location)) or "???"
+	local dist = Game.system and Distance(Game.system:DistanceTo(mission.location), "LY"):to_string() or "???"
 	return ui:Grid(2,1)
 		:SetColumn(0,{ui:VBox(10):PackEnd({ui:MultiLineText((flavours[mission.flavour].introtext):interp({
 														name   = mission.client.name,
@@ -547,7 +549,7 @@ local onClick = function (mission)
 											})
 											:SetColumn(1, {
 												ui:VBox():PackEnd({
-													ui:Label(dist.." "..l.LY)
+													ui:Label(dist)
 												})
 											}),
 										ui:Margin(5),
