@@ -6,6 +6,7 @@ local Lang = import("Lang")
 local Game = import("Game")
 local Format = import("Format")
 local Character = import("Character")
+local Distance = import("Distance")
 
 local SmallLabeledButton = import("ui/SmallLabeledButton")
 local SmartTable = import("ui/SmartTable")
@@ -67,8 +68,8 @@ local missions = function (tabGroup)
 		end
 		-- Format the distance label
 		local playerSystem = Game.system or Game.player:GetHyperspaceTarget()
-		local dist = playerSystem:DistanceTo(mission.location)
-		local distLabel = ui:Label(string.format('%.2f %s', dist, l.LY))
+		local distance = Distance(playerSystem:DistanceTo(mission.location), "AU")
+		local distLabel = ui:Label(distance:to_string())
 		local hyperjumpStatus = Game.player:GetHyperspaceDetails(mission.location)
 		if hyperjumpStatus == 'CURRENT_SYSTEM' then
 			distLabel:SetColor({ r = 0.0, g = 1.0, b = 0.2 }) -- green
@@ -101,7 +102,7 @@ local missions = function (tabGroup)
 		{ -- if we don't specify widget, default one will be used
 			{data = description or l.NONE},
 			{data = mission.client.name},
-			{data = dist, widget = locationBox},
+			{data = distance:get(), widget = locationBox},
 			{data = mission.due, widget = dueBox},
 			{data = mission.reward, widget = ui:Label(Format.Money(mission.reward)):SetColor({ r = 0.0, g = 1.0, b = 0.2 })}, -- green
 			-- nil description means mission type isn't registered.
