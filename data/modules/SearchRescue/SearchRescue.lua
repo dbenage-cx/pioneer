@@ -46,17 +46,18 @@ local InfoFace = import("ui/InfoFace")
 local NavButton = import("ui/NavButton")
 local Rand = import("Rand")
 local ModelSkin = import("SceneGraph.ModelSkin")
+local Distance = import("Distance")
 local l = Lang.GetResource("module-searchrescue")
 
 -- Get the UI class
 local ui = Engine.ui
 
 -- basic variables for mission creation
-local max_mission_dist = 30          -- max distance for long distance mission target location [ly]
-local max_close_dist = 5000          -- max distance for "CLOSE_PLANET" target location [km]
-local max_close_space_dist = 10000   -- max distance for "CLOSE_SPACE" target location [km]
-local far_space_orbit_dist = 100000  -- orbital distance around planet for "FAR_SPACE" target location [km]
-local min_interaction_dist = 50      -- min distance for successful interaction with target [meters]
+local max_mission_dist = Distance(30, "LY")         -- max distance for long distance mission target location [ly]
+local max_close_dist = Distance(5000, "KM")         -- max distance for "CLOSE_PLANET" target location [km]
+local max_close_space_dist = Distance(10000, "KM")  -- max distance for "CLOSE_SPACE" target location [km]
+local far_space_orbit_dist = Distance(100000, "KM") -- orbital distance around planet for "FAR_SPACE" target location [km]
+local min_interaction_dist = Distance(100)          -- min distance for successful interaction with target [meters]
 local target_interaction_time = 10   -- target interaction time to load/unload one unit of cargo/person [sec]
 local max_pass = 20                  -- max number of passengers on target ship
 local max_crew = 8                   -- max number of crew on target ship (high max: 8)
@@ -334,11 +335,6 @@ local getNumberOfFlavours = function (str)
 	return num - 1
 end
 
-local mToAU = function (meters)
-	-- Transform meters into AU.
-	return meters/149598000000
-end
-
 local splitName = function (name)
 	-- Splits the supplied name into first and last name and returns a table of both separately.
 	-- Idea from http://stackoverflow.com/questions/2779700/lua-split-into-words.
@@ -375,7 +371,7 @@ local randomLatLong = function (station)
 	-- Provide a set of random latitude and longitude coordinates for ship placement that are:
 	-- (a) random, within max_close_dist from starting base if base is provided, or
 	-- (b) completely random.
-	local lat, long, dist
+	local lat, long, distance
 
 	-- calc new lat/lon based on distance and bearing
 	-- formulas taken from http://www.movable-type.co.uk/scripts/latlong.html
@@ -383,19 +379,20 @@ local randomLatLong = function (station)
 		local old_lat, old_long = station:GetGroundPosition()
 		local planet_radius = station.path:GetSystemBody().parent.radius / 1000
 		local bearing = math.rad(Engine.rand:Number(0,360))
-		dist = Engine.rand:Integer(1,max_close_dist)  -- min distance is 1 km
-		lat = math.asin(math.sin(old_lat) * math.cos(dist/planet_radius) + math.cos(old_lat) *
-			                math.sin(dist/planet_radius) * math.cos(bearing))
-		long = old_long + math.atan2(math.sin(bearing) * math.sin(dist/planet_radius) * math.cos(old_lat),
-		                             math.cos(dist/planet_radius) - math.sin(old_lat) * math.sin(lat))
-		dist = dist * 1000  -- convert to m for downstream consistency
+		distance = Distance(Engine.rand:Integer(1,max_close_dist:get("KM")), "KM")  -- min distance is 1 km
+        local dist_km = distance:get("KM")
+		lat = math.asin(math.sin(old_lat) * math.cos(dist_km/planet_radius) + math.cos(old_lat) *
+			                math.sin(dist_km/planet_radius) * math.cos(bearing))
+		long = old_long + math.atan2(math.sin(bearing) * math.sin(dist_km/planet_radius) * math.cos(old_lat),
+		                             math.cos(dist_km/planet_radius) - math.sin(old_lat) * math.sin(lat))
 	else
 		lat = Engine.rand:Number(-90,90)
 		lat = math.rad(lat)
 		long = Engine.rand:Number(-180,180)
 		long = math.rad(long)
+        distance = Distance(0)
 	end
-	return lat, long, dist
+	return lat, long, distance
 end
 
 local shipdefFromName = function (shipdef_name)
@@ -712,9 +709,9 @@ local createTargetShip = function (mission)
 	elseif mission.flavour.loctype == "MEDIUM_PLANET" then
 		ship = Space.SpawnShipLanded(shipdef.id, Space.GetBody(mission.planet_target.bodyIndex), mission.lat, mission.long)
 	elseif mission.flavour.loctype == "CLOSE_SPACE" then
-		ship = Space.SpawnShipNear(shipdef.id, Space.GetBody(mission.station_target.bodyIndex), mission.dist/1000, mission.dist/1000)
+		ship = Space.SpawnShipNear(shipdef.id, Space.GetBody(mission.station_target.bodyIndex), mission.distMeters/1000, mission.distMeters/1000)
 	elseif mission.flavour.loctype == "FAR_SPACE" then
-		ship = Space.SpawnShipNear(shipdef.id, Space.GetBody(mission.planet_target.bodyIndex), far_space_orbit_dist, far_space_orbit_dist)
+		ship = Space.SpawnShipNear(shipdef.id, Space.GetBody(mission.planet_target.bodyIndex), far_space_orbit_dist:get("KM"), far_space_orbit_dist:get("KM"))
 		ship:AIEnterHighOrbit(Space.GetBody(mission.planet_target.bodyIndex))
 	end
 
@@ -833,9 +830,9 @@ local onChat = function (form, ref, option)
 	elseif option == 1 then  -- where is the target
 		local dist
 		if ad.flavour.loctype == "CLOSE_PLANET" or ad.flavour.loctype == "CLOSE_SPACE" then
-			dist = string.format("%.0f", ad.dist/1000)
+			dist = string.format("%.0f", ad.distMeters/1000)
 		else
-			dist = string.format("%.2f", ad.dist)
+			dist = string.format("%.2f", ad.distMeters)
 		end
 
 		local locationtext = string.interp(ad.flavour.locationtext, {
@@ -912,7 +909,7 @@ local onChat = function (form, ref, option)
 			system_target      = ad.system_target,
 			entity             = ad.entity,
 			problem            = ad.problem,
-			dist               = ad.dist,
+			distMeters         = ad.distMeters,
 			flavour            = ad.flavour,
 			target             = nil,
 			lat                = ad.lat,
@@ -1018,8 +1015,8 @@ local findNearbyStations = function (vacuum, body)
 	local nearbystations_dist = {}
 	for _,station in pairs(nearbystations_raw) do
 		if station ~= body then
-			local dist = body:DistanceTo(station)
-			table.insert(nearbystations_dist, {station, dist})
+			local distance = Distance(body:DistanceTo(station))
+			table.insert(nearbystations_dist, {station, distance:get("LY")})
 		end
 	end
 
@@ -1077,16 +1074,16 @@ local findNearbySystems = function (with_stations)
 	-- get systems (either inhabited or not - depending on variable with_stations)
 	local nearbysystems_raw
 	if with_stations == true then
-		nearbysystems_raw = Game.system:GetNearbySystems(max_mission_dist, function (s) return #s:GetStationPaths() > 0 end)
+		nearbysystems_raw = Game.system:GetNearbySystems(max_mission_dist:get("LY"), function (s) return #s:GetStationPaths() > 0 end)
 	else
-		nearbysystems_raw = Game.system:GetNearbySystems(max_mission_dist, function (s) return #s:GetStationPaths() == 0 end)
+		nearbysystems_raw = Game.system:GetNearbySystems(max_mission_dist:get("LY"), function (s) return #s:GetStationPaths() == 0 end)
 	end
 
 	-- determine distance to player system
 	local nearbysystems_dist = {}
 	for _,system in pairs(nearbysystems_raw) do
-		local dist = Game.system:DistanceTo(system)
-		table.insert(nearbysystems_dist, {system, dist})
+		local distance = Distance(Game.system:DistanceTo(system), "LY")
+		table.insert(nearbysystems_dist, {system, distance:get("LY")})
 	end
 
 	-- sort systems by distance to player system (ascending)
@@ -1160,7 +1157,7 @@ local discardShip = function (ship)
 	-- 3. fly to high orbit and explode.
 	local with_stations = true
 	local nearbysystems = findNearbySystems(with_stations)
-	local status, distance, fuel, duration = ship:GetHyperspaceDetails(Game.system.path, nearbysystems[1])
+	local status, dist, fuel, duration = ship:GetHyperspaceDetails(Game.system.path, nearbysystems[1])
 	if #nearbysystems > 0 and status == "OK" then
 		Timer:CallAt(Game.time + Engine.rand:Integer(5,10), function ()
 			             ship:AIEnterLowOrbit(ship:FindNearestTo("PLANET") or ship:FindNearestTo("STAR"))
@@ -1169,7 +1166,7 @@ local discardShip = function (ship)
 	else
 		with_stations = false
 		nearbysystems = findNearbySystems(with_stations)
-		status, distance, fuel, duration = ship:GetHyperspaceDetails(Game.system.path, nearbysystems[1])
+		status, dist, fuel, duration = ship:GetHyperspaceDetails(Game.system.path, nearbysystems[1])
 		if #nearbysystems > 0 and status == "OK" then
 			Timer:CallAt(Game.time + Engine.rand:Integer(5,10), function ()
 				             ship:AIEnterLowOrbit(ship:FindNearestTo("PLANET") or ship:FindNearestTo("STAR"))
@@ -1186,7 +1183,7 @@ end
 
 local makeAdvert = function (station, manualFlavour, closestplanets)
 	-- Make a single advertisement for the bulletin board of the supplied station.
-	local due, dist, client, entity, problem, location
+	local due, distance, client, entity, problem, location
 	local lat = 0
 	local long = 0
 
@@ -1210,7 +1207,7 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 		planet_target = planet_local
 		system_target = system_local
 		location = planet_target
-		lat, long, dist = randomLatLong(station)
+		lat, long, distance = randomLatLong(station)
 		due = Game.time + 60 * 60 * Engine.rand:Number(2,24)        --TODO: adjust due date based on urgency
 
 	elseif flavour.loctype == "MEDIUM_PLANET" then
@@ -1228,16 +1225,16 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 
 		system_target = system_local
 		location = planet_target
-		lat, long, dist = randomLatLong()
-		dist = station:DistanceTo(Space.GetBody(planet_target.bodyIndex))  --overwrite empty dist from randomLatLong()
-		due = Game.time + (mToAU(dist) * 4) * Engine.rand:Integer(20,24) * 60 * 60     -- TODO: adjust due date based on urgency
+		lat, long, distance = randomLatLong()
+		distance = Distance(station:DistanceTo(Space.GetBody(planet_target.bodyIndex)))  --ignore empty dist from randomLatLong()
+		due = Game.time + (distance:get("AU") * 4) * Engine.rand:Integer(20,24) * 60 * 60     -- TODO: adjust due date based on urgency
 
 	elseif flavour.loctype == "CLOSE_SPACE" then
 		station_target = station_local
 		planet_target = planet_local
 		system_target = system_local
 		location = planet_target
-		dist = 1000 * Engine.rand:Integer(1,max_close_space_dist)     -- minimum of 1 km distance from station
+		distance = Distance(Engine.rand:Integer(1, max_close_space_dist:get("KM")), "KM")  -- minimum of 1 km distance from station
 		due = Game.time + (60 * 60 * Engine.rand:Number(2,24))        --TODO: adjust due date based on urgency
 
 	elseif flavour.loctype == "FAR_SPACE" then
@@ -1248,8 +1245,8 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 		planet_target = randomPlanet(system_target:GetStarSystem())
 		if not planet_target then return nil end
 		location = planet_target
-		dist = system_local:DistanceTo(system_target)
-		due = Game.time + (5 * dist + 4) * Engine.rand:Integer(20,24) * 60 * 60     -- TODO: adjust due date based on urgency
+		distance = Distance(system_local:DistanceTo(system_target), "LY")
+		due = Game.time + (5 * distance:get("LY") + 4) * Engine.rand:Integer(20,24) * 60 * 60     -- TODO: adjust due date based on urgency
 	end
 
 	-- determine pickup and deliver of items based on mission flavour
@@ -1341,7 +1338,7 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 		client	       = client,
 		entity         = entity,
 		problem        = problem,
-		dist           = dist,
+		distMeters     = distance:get(),
 		due	       = due,
 		urgency	       = urgency,
 		reward         = reward,
@@ -1485,7 +1482,7 @@ end
 
 local targetInteractionDistance = function (mission)
 	-- Determine if player is within interaction distance from mission target.
-	if Game.player:DistanceTo(mission.target) <= min_interaction_dist then
+	if Game.player:DistanceTo(mission.target) <= min_interaction_dist:get("LY") then
 		return true
 	else
 		return false
@@ -2121,18 +2118,10 @@ end
 
 local onClick = function (mission)
 	-- Show mission details on the mission info screen once accepted.
-	local dist = Game.system and string.format("%.2f", Game.system:DistanceTo(mission.system_target:GetStarSystem())) or "???"
+	local dist_for_text = Game.system and Distance(Game.system:DistanceTo(mission.system_target:GetStarSystem()), "LY"):to_string() or "???"
 
-	local dist_for_text
 	if mission.flavour.loctype ~= "FAR_SPACE" then
-		local au = mToAU(mission.dist)
-		if au > 0.01 then
-			dist_for_text = string.format("%.2f", au).." "..l.AU
-		else
-			dist_for_text = string.format("%.0f", mission.dist/1000).." "..l.KM
-		end
-	else
-		dist_for_text = dist.." "..l.LY
+		dist_for_text = Distance(mission.distMeters):to_string()
 	end
 
 	local location_for_text
