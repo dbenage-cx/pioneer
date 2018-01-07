@@ -14,6 +14,7 @@ local Character = import("Character")
 local Equipment = import("Equipment")
 local ShipDef = import("ShipDef")
 local Ship = import("Ship")
+local Distance = import("Distance")
 local utils = import("utils")
 
 local InfoFace = import("ui/InfoFace")
@@ -26,11 +27,11 @@ local l_ui_core = Lang.GetResource("ui-core")
 local ui = Engine.ui
 
 -- don't produce missions for further than this many light years away
-local max_delivery_dist = 15
+local max_delivery_dist = Distance(15, "LY")
 -- typical time for travel to a system max_delivery_dist away
-local typical_travel_time = (2.5 * max_delivery_dist + 8) * 24 * 60 * 60
+local typical_travel_time = (2.5 * max_delivery_dist:get("LY") + 8) * 24 * 60 * 60
 -- typical reward for delivery to a system max_delivery_dist away
-local typical_reward = 35 * max_delivery_dist
+local typical_reward = 35 * max_delivery_dist:get("LY")
 -- typical reward for local delivery
 local typical_reward_local = 35
 -- max cargo per trip
@@ -315,7 +316,7 @@ local onChat = function (form, ref, option)
 			dom_sectorx  = ad.domicile.sectorX,
 			dom_sectory  = ad.domicile.sectorY,
 			dom_sectorz  = ad.domicile.sectorZ,
-			dist         = string.format("%.2f", ad.dist),
+			dist         = string.format("%.2f", Distance.convert(ad.distMeters or ad.dist or 0, "M", "LY")),
 		})
 		form:SetMessage(introtext)
 
@@ -421,9 +422,9 @@ local findNearbyStations = function (station, minDist)
 	local nearbystations = {}
 	for _,s in ipairs(Game.system:GetStationPaths()) do
 		if s ~= station.path then
-			local dist = station:DistanceTo(Space.GetBody(s.bodyIndex))
-			if dist >= minDist then
-				table.insert(nearbystations, { s, dist })
+			local distance = Distance(station:DistanceTo(Space.GetBody(s.bodyIndex)))
+			if distance:get() >= minDist:get() then
+				table.insert(nearbystations, { s, distance })
 			end
 		end
 	end
@@ -448,7 +449,7 @@ end
 local nearbysystems
 
 local makeAdvert = function (station)
-	local reward, due, location, nearbysystem, dist, nearbystations, amount
+	local reward, due, location, nearbysystem, distance, nearbystations, amount
 	local risk, wholesaler, pickup, branch, cargotype, missiontype
 	local client = Character.New()
 	local urgency = Engine.rand:Number(0, 1)
@@ -457,15 +458,15 @@ local makeAdvert = function (station)
 	branch, cargotype = randomCargo()
 	if localdelivery then
 		nearbysystem = Game.system
-		nearbystations = findNearbyStations(station, 1000)
+		nearbystations = findNearbyStations(station, Distance(1000))
 		if #nearbystations == 0 then return nil end
 		amount = Engine.rand:Integer(1, max_cargo)
 		risk = 0 -- no risk for local delivery
 		wholesaler = false -- no local wholesaler delivery
 		pickup = Engine.rand:Number(0, 1) > 0.75 and true or false
-		location, dist = table.unpack(nearbystations[Engine.rand:Integer(1,#nearbystations)])
-		reward = typical_reward_local + (math.sqrt(dist) / 15000) * (1+urgency) * (1+amount/max_cargo)
-		due = (4*24*60*60) + (24*60*60 * (dist / (1.49*10^11))) * (1.5 - urgency)
+		location, distance = table.unpack(nearbystations[Engine.rand:Integer(1,#nearbystations)])
+		reward = typical_reward_local + (math.sqrt(distance:get()) / 15000) * (1+urgency) * (1+amount/max_cargo)
+		due = (4*24*60*60) + (24*60*60 * distance:get("AU")) * (1.5 - urgency)
 		if pickup then
 			missiontype = "PICKUP_LOCAL"
 			reward = reward * pickup_factor
@@ -476,11 +477,11 @@ local makeAdvert = function (station)
 		end
 	else
 		if nearbysystems == nil then
-			nearbysystems = Game.system:GetNearbySystems(max_delivery_dist, function (s) return #s:GetStationPaths() > 0 end)
+			nearbysystems = Game.system:GetNearbySystems(max_delivery_dist:get("LY"), function (s) return #s:GetStationPaths() > 0 end)
 		end
 		if #nearbysystems == 0 then return nil end
 		nearbysystem = nearbysystems[Engine.rand:Integer(1,#nearbysystems)]
-		dist = nearbysystem:DistanceTo(Game.system)
+		distance = Distance(nearbysystem:DistanceTo(Game.system), "LY")
 		nearbystations = nearbysystem:GetStationPaths()
 		location = nearbystations[Engine.rand:Integer(1,#nearbystations)]
 		wholesaler = Engine.rand:Number(0, 1) > 0.75 and true or false
@@ -498,8 +499,9 @@ local makeAdvert = function (station)
 			end
 		end
 		risk = 0.75 * cargotype.price / max_price + Engine.rand:Number(0, 0.25) -- goods with price max_price have a risk of 0.75 to 1
-		reward = (dist / max_delivery_dist) * typical_reward * (1+risk) * (1.5+urgency) * (1+amount/max_cargo_wholesaler) * Engine.rand:Number(0.8,1.2)
-		due = (dist / max_delivery_dist) * typical_travel_time * (1.5 - urgency)
+        local dist_max_ratio = distance:get() / max_delivery_dist:get()
+		reward = dist_max_ratio * typical_reward * (1+risk) * (1.5+urgency) * (1+amount/max_cargo_wholesaler) * Engine.rand:Number(0.8,1.2)
+		due = dist_max_ratio * typical_travel_time * (1.5 - urgency)
 		if pickup then
 			reward = reward * pickup_factor
 			due = due * pickup_factor + Game.time
@@ -525,7 +527,7 @@ local makeAdvert = function (station)
 		wholesaler    = wholesaler,
 		pickup        = pickup,
 		introtext     = introtext,
-		dist          = dist,
+		distMeters    = distance:get(),
 		due           = due,
 		amount        = amount,
 		branch        = branch,
@@ -873,7 +875,7 @@ end
 
 local onClick = function (mission)
 	local danger
-	local dist = Game.system and string.format("%.2f", Game.system:DistanceTo(mission.location)) or "???"
+	local dist = Game.system and Distance(Game.system:DistanceTo(mission.location), "LY"):to_string() or "???"
 	if mission.localdelivery then
 		danger = l.RISK_1
 	else
@@ -925,7 +927,7 @@ local onClick = function (mission)
 											})
 											:SetColumn(1, {
 												ui:VBox():PackEnd({
-													ui:Label(dist.." "..l.LY)
+													ui:Label(dist)
 												})
 											}),
 										NavButton.New(l.SET_AS_TARGET, mission.location),
@@ -1028,7 +1030,7 @@ local onClick = function (mission)
 											})
 											:SetColumn(1, {
 												ui:VBox():PackEnd({
-													ui:Label(dist.." "..l.LY)
+													ui:Label(dist)
 												})
 											}),
 										NavButton.New(l.SET_AS_TARGET, mission.location),
@@ -1066,7 +1068,7 @@ local onClick = function (mission)
 											})
 											:SetColumn(1, {
 												ui:VBox():PackEnd({
-													ui:Label((string.format("%.2f", Game.system:DistanceTo(mission.domicile)) or "???") .. " " .. l.LY)
+													ui:Label(Distance(Game.system:DistanceTo(mission.domicile), "LY"):to_string() or "???")
 												})
 											}),
 										NavButton.New(l.SET_RETURN_ROUTE, mission.domicile),
