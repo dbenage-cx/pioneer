@@ -10,6 +10,7 @@ local Event = import("Event")
 local Serializer = import("Serializer")
 local ShipDef = import("ShipDef")
 local Ship = import("Ship")
+local Distance = import("Distance")
 local utils = import("utils")
 local e = import ("Equipment")
 
@@ -214,7 +215,7 @@ local getNearestStarport = function (ship, current)
 	local trader = trade_ships[ship]
 
 	-- Find the nearest starport that we can land at (other than current)
-	local starport, distance
+	local starport, distMeters
 	for i = 1, #starports do
 		local next_starport = starports[i]
 		if next_starport ~= current then
@@ -223,8 +224,8 @@ local getNearestStarport = function (ship, current)
 				(next_starport.type == 'STARPORT_ORBITAL') or
 				(not next_starport.path:GetSystemBody().parent.hasAtmosphere))
 
-			if next_canland and ((starport == nil) or (next_distance < distance)) then
-				starport, distance = next_starport, next_distance
+			if next_canland and ((starport == nil) or (next_distance < distMeters)) then
+				starport, distMeters = next_starport, next_distance
 			end
 		end
 	end
@@ -791,8 +792,8 @@ local onShipHit = function (ship, attacker)
 		if #starports == 0 then
 			trader['no_jump'] = true -- it already tried in onEnterSystem
 		elseif trader.starport and Engine.rand:Number(1) < trader.chance then
-			local distance = ship:DistanceTo(trader.starport)
-			if distance > 149598000 * (2 - trader.chance) then -- 149,598,000km = 1AU
+			local distance = Distance(ship:DistanceTo(trader.starport))
+			if distance:get("AU") > (2 - trader.chance) then
 				if getSystemAndJump(ship) then
 					return
 				else
