@@ -14,6 +14,7 @@ local Character = import("Character")
 local Equipment = import("Equipment")
 local ShipDef = import("ShipDef")
 local Ship = import("Ship")
+local Distance = import("Distance")
 local utils = import("utils")
 
 local InfoFace = import("ui/InfoFace")
@@ -25,12 +26,12 @@ local l = Lang.GetResource("module-deliverpackage")
 local ui = Engine.ui
 
 -- don't produce missions for further than this many light years away
-local max_delivery_dist = 30
+local max_delivery_dist = Distance(30, "LY")
 -- typical time for travel to a system max_delivery_dist away
 --	Irigi: ~ 4 days for in-system travel, the rest is FTL travel time
-local typical_travel_time = (1.6 * max_delivery_dist + 4) * 24 * 60 * 60
+local typical_travel_time = (1.6 * max_delivery_dist:get("LY") + 4) * 24 * 60 * 60
 -- typical reward for delivery to a system max_delivery_dist away
-local typical_reward = 25 * max_delivery_dist
+local typical_reward = 25 * max_delivery_dist:get("LY")
 
 local num_pirate_taunts = 10
 local num_deny = 8
@@ -152,7 +153,7 @@ local onChat = function (form, ref, option)
 			sectorx  = ad.location.sectorX,
 			sectory  = ad.location.sectorY,
 			sectorz  = ad.location.sectorZ,
-			dist     = string.format("%.2f", ad.dist),
+			dist     = string.format("%.2f", Distance.convert(ad.distMeters or ad.dist or 0, "M", "LY")),
 		})
 		form:SetMessage(introtext)
 
@@ -218,9 +219,9 @@ local findNearbyStations = function (station, minDist)
 	local nearbystations = {}
 	for _,s in ipairs(Game.system:GetStationPaths()) do
 		if s ~= station.path then
-			local dist = station:DistanceTo(Space.GetBody(s.bodyIndex))
-			if dist >= minDist then
-				table.insert(nearbystations, { s, dist })
+			local distance = Distance(station:DistanceTo(Space.GetBody(s.bodyIndex)))
+			if distance:get() >= minDist:get() then
+				table.insert(nearbystations, { s, distance })
 			end
 		end
 	end
@@ -230,7 +231,7 @@ end
 -- return statement is nil if no advert was created, else it is bool:
 -- true if a localdelivery, false for non-local
 local makeAdvert = function (station, manualFlavour, nearbystations)
-	local reward, due, location, nearbysystem, dist
+	local reward, due, location, nearbysystem, distance
 	local client = Character.New()
 
 	-- set flavour manually if a second arg is given
@@ -242,23 +243,24 @@ local makeAdvert = function (station, manualFlavour, nearbystations)
 	if flavours[flavour].localdelivery then
 		nearbysystem = Game.system
 		if nearbystations == nil then
-			nearbystations = findNearbyStations(station, 1000)
+			nearbystations = findNearbyStations(station, Distance(1000))
 		end
 		if #nearbystations == 0 then return nil end
-		location, dist = table.unpack(nearbystations[Engine.rand:Integer(1,#nearbystations)])
-		reward = 25 + (math.sqrt(dist) / 15000) * (1+urgency)
+		location, distance = table.unpack(nearbystations[Engine.rand:Integer(1,#nearbystations)])
+		reward = 25 + (math.sqrt(distance:get()) / 15000) * (1+urgency)
 		due = Game.time + ((4*24*60*60) * (Engine.rand:Number(1.5,3.5) - urgency))
 	else
 		if nearbysystems == nil then
-			nearbysystems = Game.system:GetNearbySystems(max_delivery_dist, function (s) return #s:GetStationPaths() > 0 end)
+			nearbysystems = Game.system:GetNearbySystems(max_delivery_dist:get("LY"), function (s) return #s:GetStationPaths() > 0 end)
 		end
 		if #nearbysystems == 0 then return nil end
 		nearbysystem = nearbysystems[Engine.rand:Integer(1,#nearbysystems)]
-		dist = nearbysystem:DistanceTo(Game.system)
+		distance = Distance(nearbysystem:DistanceTo(Game.system), "LY")
 		local nearbystations = nearbysystem:GetStationPaths()
 		location = nearbystations[Engine.rand:Integer(1,#nearbystations)]
-		reward = ((dist / max_delivery_dist) * typical_reward * (1+risk) * (1.5+urgency) * Engine.rand:Number(0.8,1.2))
-		due = Game.time + ((dist / max_delivery_dist) * typical_travel_time * (1.5-urgency) * Engine.rand:Number(0.9,1.1))
+        local dist_max_ratio = distance:get() / max_delivery_dist:get()
+		reward = (dist_max_ratio * typical_reward * (1+risk) * (1.5+urgency) * Engine.rand:Number(0.8,1.2))
+		due = Game.time + (dist_max_ratio * typical_travel_time * (1.5-urgency) * Engine.rand:Number(0.9,1.1))
 	end
 	reward = math.ceil(reward)
 
@@ -268,7 +270,7 @@ local makeAdvert = function (station, manualFlavour, nearbystations)
 		client		= client,
 		location	= location,
 		localdelivery = flavours[flavour].localdelivery,
-		dist            = dist,
+		distMeters  = distance:get(),
 		due		= due,
 		risk		= risk,
 		urgency		= urgency,
@@ -298,9 +300,9 @@ end
 
 local onCreateBB = function (station)
 	if nearbysystems == nil then
-		nearbysystems = Game.system:GetNearbySystems(max_delivery_dist, function (s) return #s:GetStationPaths() > 0 end)
+		nearbysystems = Game.system:GetNearbySystems(max_delivery_dist:get("LY"), function (s) return #s:GetStationPaths() > 0 end)
 	end
-	local nearbystations = findNearbyStations(station, 1000)
+	local nearbystations = findNearbyStations(station, Distance(1000))
 	local num = Engine.rand:Integer(0, math.ceil(Game.system.population))
 	local numAchievableJobs = 0
 	local reputation = Character.persistent.player.reputation
@@ -479,7 +481,7 @@ local onGameStart = function ()
 end
 
 local onClick = function (mission)
-	local dist = Game.system and string.format("%.2f", Game.system:DistanceTo(mission.location)) or "???"
+	local dist = Game.system and Distance(Game.system:DistanceTo(mission.location), "LY"):to_string() or "???"
 	local danger
 	if mission.risk <= 0.1 then
 		danger = (l.I_HIGHLY_DOUBT_IT)
@@ -558,7 +560,7 @@ local onClick = function (mission)
 											})
 											:SetColumn(1, {
 												ui:VBox():PackEnd({
-													ui:Label(dist.." "..l.LY)
+													ui:Label(dist)
 												})
 											}),
 										ui:Margin(5),
