@@ -31,10 +31,11 @@ local Event = import("Event")
 local Format = import("Format")
 local Serializer = import("Serializer")
 local Equipment = import ("Equipment")
+local Distance = import("Distance")
 
 local l = Lang.GetResource("module-newseventcommodity")
 
-local maxDist = 50          -- for spawning news (ly)
+local maxDist = Distance(50, "LY")          -- for spawning news (ly)
 local minTime = 15768000    -- no news the first 5 months of a new game (sec)
 
 -- to spawn a new event per hyperjump, provided no other news.
@@ -188,7 +189,7 @@ local createNewsEvent = function (timeInHyper)
 
 	-- find system for event, excluding the current one
 	if nearbySystems == nil then
-		local dist = maxDist  * Engine.rand:Number(0.4,1.0)
+		local dist = maxDist:get("LY")  * Engine.rand:Number(0.4,1.0)
 		nearbySystems = Game.system:GetNearbySystems(dist, function (s) return #s:GetStationPaths() > 0 end)
 	end
 
@@ -224,8 +225,8 @@ local createNewsEvent = function (timeInHyper)
 	if system == nil then return end
 
 	-- expiration time depends on distance to event
-	local distance = system:DistanceTo(Game.system)  -- from here to there
-	local hyperTime = 6200*distance^2                -- hyperspace time to get there
+	local distance = Distance(system:DistanceTo(Game.system), "LY")  -- from here to there
+	local hyperTime = 6200 * distance:get("LY") ^ 2                -- hyperspace time to get there
 	local inSystemTime = 5*86400                     -- in system time to get there
 	local expires = Game.time + hyperTime*Engine.rand:Number(0.9,1.6) + inSystemTime
 
